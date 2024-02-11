@@ -32,26 +32,25 @@ import fastapi
 import uvicorn
 from PIL import Image
 from fastapi import FastAPI, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 
 from src.util.file import FileData
 from src.util.network import TelegraPh
 
 app = FastAPI()
+
+
+
 Path("data").mkdir(exist_ok=True)
 db = sqlite3.connect(Path("data/data.sqlite").as_posix())
 cursor = db.cursor()
 cursor.execute('CREATE TABLE IF NOT EXISTS telegraph (hash TEXT PRIMARY KEY, path TEXT)')
-if (path := Path("data/pic_cache.json")).exists():
-    fd = FileData.load(path)
+if (p := Path("data/pic_cache.json")).exists():
+    fd = FileData.load(p)
 else:
     fd = FileData(Path("data/pic_cache"), max_size=5 * 1024 * 1024 * 1024)
 proxy = "http://127.0.0.1:7890"
 tg = TelegraPh(_proxy=proxy)
-
-
-@app.get("/")
-async def root():
-    return {"message": "Hello World"}
 
 
 @app.post("/upload")
@@ -65,6 +64,8 @@ async def upload(file: UploadFile):
     with tempfile.TemporaryFile('wb+') as temp:
         while chunk := await file.read(1024):
             temp.write(chunk)
+        if temp.tell() > 4 * 1024 * 1024:
+            return {"status": "error", "message": "file too large"}
         try:
             temp.seek(0)
             Image.open(temp).verify()
@@ -76,7 +77,7 @@ async def upload(file: UploadFile):
         temp.seek(0)
         _hash = fd.add_file(temp)
         db.execute("INSERT INTO telegraph (hash, path) VALUES (?, ?)", (_hash, uid))
-    return {"src": f"/pic/{_hash}"}
+    return {"src": f"/pic/{_hash}", "status": "ok"}
 
 
 @app.get("/pic/{pic_hash}")
@@ -102,6 +103,15 @@ async def get_pic(pic_hash: str):
     resp = fastapi.responses.Response(content=rt_data.read(), media_type=f"image/{img.format.lower()}")
 
     return resp
+
+
+@app.get("/")
+@app.get("/{path:path}")
+def send_static(path=None):
+    static_folder = Path("hello-world/dist")
+    if not path or (not (Path.cwd() / static_folder / path).exists()):
+        path = "index.html"
+    return fastapi.responses.FileResponse(Path.cwd() / static_folder / path)
 
 
 config = uvicorn.Config(

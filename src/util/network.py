@@ -39,8 +39,12 @@ class TelegraPh:
         files = {'file': file}
         async with aiohttp.ClientSession() as session:
             async with session.post(url, data=files, proxy=self._proxy) as r:
-                u: str = json.loads(await r.text())[0]['src']
-                return u
+
+                resp: dict | list = json.loads(await r.text())
+                if isinstance(resp, dict):
+                    if resp.get("error", None) is not None:
+                        raise Exception(f"error: {resp['error']}")
+                return resp[0]['src']
 
     async def get(self, path: str):
         url = f"https://telegra.ph/{path}"
